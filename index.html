@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fragerei</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@300;400&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: #0a0a1a;
+      font-family: 'Inter', sans-serif;
+      overflow: hidden;
+    }
+
+    canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+    }
+
+    .page {
+      position: relative;
+      z-index: 2;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2.8rem;
+    }
+
+    .logo {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.7rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #6c63ff, #ff6b6b);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      user-select: none;
+      letter-spacing: -0.01em;
+    }
+
+    .btn-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 180px;
+      height: 180px;
+    }
+
+    /* Pulsierender Glowing Ring im Ruhezustand */
+    .glow-ring {
+      position: absolute;
+      width: 140px;
+      height: 140px;
+      border-radius: 50%;
+      background: transparent;
+      border: 1.5px solid rgba(108, 99, 255, 0.4);
+      animation: pulse-ring 2.4s ease-out infinite;
+    }
+    .glow-ring:nth-child(2) { animation-delay: 0.8s; }
+    .glow-ring:nth-child(3) { animation-delay: 1.6s; }
+
+    @keyframes pulse-ring {
+      0%   { transform: scale(0.85); opacity: 0.6; }
+      100% { transform: scale(1.6);  opacity: 0; }
+    }
+
+    .ripple-btn {
+      position: relative;
+      z-index: 3;
+      width: 128px;
+      height: 128px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      background: linear-gradient(135deg, #6c63ff 0%, #a855f7 50%, #ff6b6b 100%);
+      color: #fff;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.88rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      text-align: center;
+      line-height: 1.4;
+      padding: 0 18px;
+      box-shadow:
+        0 0 0 0 rgba(108,99,255,0),
+        0 8px 40px rgba(108, 99, 255, 0.5),
+        inset 0 1px 0 rgba(255,255,255,0.2);
+      transition: transform 0.15s cubic-bezier(.2,.8,.3,1.2), box-shadow 0.15s ease;
+      outline: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .ripple-btn:hover {
+      transform: scale(1.05);
+      box-shadow:
+        0 0 0 0 rgba(108,99,255,0),
+        0 12px 50px rgba(108, 99, 255, 0.65),
+        inset 0 1px 0 rgba(255,255,255,0.25);
+    }
+
+    .ripple-btn.pressed {
+      transform: scale(0.91);
+      box-shadow:
+        0 0 0 0 rgba(108,99,255,0),
+        0 4px 20px rgba(108, 99, 255, 0.3),
+        inset 0 2px 6px rgba(0,0,0,0.3);
+    }
+
+    .tagline {
+      font-size: 0.78rem;
+      font-weight: 300;
+      color: rgba(160,160,200,0.7);
+      letter-spacing: 0.06em;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div class="page">
+  <span class="logo">Fragerei</span>
+
+  <div class="btn-wrap">
+    <div class="glow-ring"></div>
+    <div class="glow-ring"></div>
+    <div class="glow-ring"></div>
+    <button class="ripple-btn" id="btn">
+      Bereit für<br>deine Frage?
+    </button>
+  </div>
+
+  <span class="tagline">Für echte Begegnung · Gegen Einsamkeit</span>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+
+// ── Vertex Shader ────────────────────────────────────────────────
+const vsSource = `
+  attribute vec2 a_pos;
+  void main() {
+    gl_Position = vec4(a_pos, 0.0, 1.0);
+  }
+`;
+
+// ── Fragment Shader — 3D Wasser-Ripple ──────────────────────────
+const fsSource = `
+  precision highp float;
+
+  uniform vec2  u_res;
+  uniform float u_time;
+  uniform vec2  u_origin;   // Klick-Ursprung (normalisiert 0..1)
+  uniform float u_trigger;  // 0 = Ruhezustand, 1 = aktiv
+  uniform float u_expand;   // 0..1 wie weit die Wellen sich ausgedehnt haben
+
+  // ── Farbpalette: Tief-Lila → Violett → Pink → Orange → Weiss ──
+  vec3 waterColor(float t) {
+    vec3 c0 = vec3(0.04, 0.04, 0.10);  // tiefstes Dunkel
+    vec3 c1 = vec3(0.27, 0.25, 1.00);  // Lila
+    vec3 c2 = vec3(0.66, 0.21, 1.00);  // Violett
+    vec3 c3 = vec3(1.00, 0.42, 0.42);  // Pink-Rot
+    vec3 c4 = vec3(1.00, 0.85, 0.60);  // Warm Gold
+    vec3 c5 = vec3(1.00, 1.00, 1.00);  // Weiss
+
+    t = clamp(t, 0.0, 1.0);
+    if (t < 0.2) return mix(c0, c1, t / 0.2);
+    if (t < 0.4) return mix(c1, c2, (t - 0.2) / 0.2);
+    if (t < 0.6) return mix(c2, c3, (t - 0.4) / 0.2);
+    if (t < 0.8) return mix(c3, c4, (t - 0.6) / 0.2);
+                 return mix(c4, c5, (t - 0.8) / 0.2);
+  }
+
+  void main() {
+    vec2 uv = gl_FragCoord.xy / u_res;
+    uv.y = 1.0 - uv.y;
+
+    // Aspect-korrigierter Abstand zum Klick-Ursprung
+    float aspect = u_res.x / u_res.y;
+    vec2 diff = (uv - u_origin) * vec2(aspect, 1.0);
+    float dist = length(diff);
+
+    // ── Ruhezustand: sanfte, langsame Ambient-Wellen ──
+    float ambient = 0.0;
+    for (int i = 1; i <= 3; i++) {
+      float fi = float(i);
+      float r  = sin(dist * (8.0 + fi * 3.0) - u_time * (0.5 + fi * 0.15)) * 0.5 + 0.5;
+      ambient += r * (0.06 / fi);
+    }
+
+    // ── Aktive Ripple-Wellen nach Klick ──
+    float ripple = 0.0;
+    if (u_trigger > 0.0) {
+      float maxD   = 1.8;
+      float front  = u_expand * maxD;         // Wellenfront
+      float spread = 0.35 + u_expand * 0.4;  // Wellenbreite wächst
+
+      // Abstand zur aktuellen Wellenfront
+      float d = dist - front;
+
+      // Mehrere Wellen hintereinander
+      for (int w = 0; w < 6; w++) {
+        float offset = float(w) * 0.18;
+        float wd = d + offset;
+        float wave = exp(-wd * wd / (spread * spread));
+
+        // 3D-Effekt: Höhenkontur durch Cosinus
+        float surface = cos(wd * 18.0 - u_time * 2.0) * 0.5 + 0.5;
+        ripple += wave * surface * (1.0 - float(w) * 0.12);
+      }
+
+      // Highlight an der Wellenfront (Lichtreflex)
+      float highlight = exp(-abs(dist - front * 0.98) * 20.0) * 0.6;
+      ripple += highlight;
+
+      ripple *= u_trigger;
+    }
+
+    // ── Gesamthelligkeit & Farbe ──
+    float brightness = ambient + ripple;
+
+    // Farbton: Ripple-Distanz bestimmt Farbe der Welle
+    float colorT = 0.0;
+    if (u_trigger > 0.0) {
+      float maxD = 1.8;
+      colorT = clamp((dist / (u_expand * maxD + 0.001)) * 0.8, 0.0, 1.0);
+      colorT = mix(1.0 - colorT, colorT * 0.4, u_expand);
+    }
+
+    vec3 col = waterColor(brightness * 1.1 + colorT * u_trigger * 0.5);
+
+    // Vignette (Ränder dunkler)
+    float vig = 1.0 - smoothstep(0.5, 1.2, length((uv - 0.5) * vec2(aspect, 1.0)));
+    col *= mix(0.85, 1.0, vig);
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;
+
+// ── WebGL Setup ──────────────────────────────────────────────────
+function compileShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  return s;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, compileShader(gl.VERTEX_SHADER,   vsSource));
+gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+// Fullscreen Quad
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+  -1,-1,  1,-1,  -1,1,
+   1,-1,  1, 1,  -1,1
+]), gl.STATIC_DRAW);
+
+const aPos = gl.getAttribLocation(prog, 'a_pos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const uRes     = gl.getUniformLocation(prog, 'u_res');
+const uTime    = gl.getUniformLocation(prog, 'u_time');
+const uOrigin  = gl.getUniformLocation(prog, 'u_origin');
+const uTrigger = gl.getUniformLocation(prog, 'u_trigger');
+const uExpand  = gl.getUniformLocation(prog, 'u_expand');
+
+// ── State ────────────────────────────────────────────────────────
+let W, H, startTime = Date.now();
+let triggered   = false;
+let triggerTime = 0;
+let originX     = 0.5;
+let originY     = 0.5;
+let redirected  = false;
+
+function resize() {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  gl.viewport(0, 0, W, H);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── Render Loop ──────────────────────────────────────────────────
+function render() {
+  const now     = (Date.now() - startTime) / 1000;
+  const elapsed = triggered ? (Date.now() - triggerTime) / 1000 : 0;
+
+  // expand: 0 → 1 über ~1.4 Sekunden, dann weiter bis Bildschirm voll
+  const expand  = triggered ? Math.min(elapsed / 1.4, 1.0) : 0.0;
+  const trigger = triggered ? Math.min(elapsed * 1.5, 1.0) : 0.0;
+
+  gl.uniform2f(uRes,    W, H);
+  gl.uniform1f(uTime,   now);
+  gl.uniform2f(uOrigin, originX, originY);
+  gl.uniform1f(uTrigger, trigger);
+  gl.uniform1f(uExpand,  expand);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+  // Weiterleitung wenn Bildschirm fast voll
+  if (triggered && elapsed > 1.5 && !redirected) {
+    redirected = true;
+    setTimeout(() => {
+      window.location.href = 'https://www.fragerei.ch';
+    }, 200);
+  }
+
+  requestAnimationFrame(render);
+}
+render();
+
+// ── Button Klick ─────────────────────────────────────────────────
+document.getElementById('btn').addEventListener('click', function(e) {
+  if (triggered) return;
+
+  const rect = this.getBoundingClientRect();
+  originX = (rect.left + rect.width  / 2) / window.innerWidth;
+  originY = (rect.top  + rect.height / 2) / window.innerHeight;
+
+  this.classList.add('pressed');
+  triggered   = true;
+  triggerTime = Date.now();
+});
+</script>
+</body>
+</html>
