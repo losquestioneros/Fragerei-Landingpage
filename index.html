@@ -265,14 +265,14 @@
                     return mix(c3, c4, (t-0.75)/0.25);
     }
 
-    // Farbpalette für Wasser-Ripple-Phase: dunkle Blautöne wie Wasser
+    // Farbpalette für Wasser-Ripple-Phase (nach Würfel)
     vec3 waterColor(float t) {
-      vec3 c0 = vec3(0.02, 0.03, 0.10);  // fast schwarz-blau
-      vec3 c1 = vec3(0.04, 0.07, 0.22);  // sehr dunkelblau
-      vec3 c2 = vec3(0.06, 0.12, 0.38);  // dunkelblau
-      vec3 c3 = vec3(0.10, 0.22, 0.55);  // mittelblau
-      vec3 c4 = vec3(0.20, 0.45, 0.75);  // wasserblau
-      vec3 c5 = vec3(0.55, 0.80, 1.00);  // helles wasserblau (Wellenspitze)
+      vec3 c0 = vec3(0.04, 0.04, 0.10);
+      vec3 c1 = vec3(0.27, 0.25, 1.00);
+      vec3 c2 = vec3(0.66, 0.21, 1.00);
+      vec3 c3 = vec3(1.00, 0.37, 0.63);
+      vec3 c4 = vec3(1.00, 0.55, 0.41);
+      vec3 c5 = vec3(1.00, 1.00, 1.00);
       t = clamp(t, 0.0, 1.0);
       if (t < 0.2) return mix(c0, c1, t/0.2);
       if (t < 0.4) return mix(c1, c2, (t-0.2)/0.2);
@@ -305,32 +305,33 @@
       float vigC = 1.0 - smoothstep(0.4, 1.1, cdist);
       vec3 colCube = mix(cubeColor(ambient) * 0.15, cubeColor(ambient), vigC);
 
-      // ── MODUS 1: Stein-ins-Wasser Effekt ──
+      // ── MODUS 1: Dunkler Wasser-Ripple nach Würfel ──
       vec2 odiff = (uv - u_origin) * vec2(aspect, 1.0);
       float odist = length(odiff);
 
-      // Sanfte Hintergrund-Wellen immer sichtbar
-      float base = sin(odist * 6.0 - u_time * 0.5) * 0.5 + 0.5;
-      base *= exp(-odist * 1.2) * 0.3;
+      float darkAmbient = 0.0;
+      for (int i = 1; i <= 3; i++) {
+        float fi = float(i);
+        darkAmbient += sin(odist*(8.0+fi*3.0) - u_time*(0.5+fi*0.15))*0.5+0.5;
+        darkAmbient *= (0.06/fi);
+      }
 
-      // Stein-ins-Wasser: mehrere Wellenringe die sich nach aussen bewegen
       float ripple = 0.0;
       if (u_trigger > 0.0) {
-        float maxR = 2.2;
-        // 5 Wellenringe mit zeitlichem Versatz — wie echte Wasserwellen
-        for (int w = 0; w < 5; w++) {
-          float delay   = float(w) * 0.22;
-          float ringPos = max(0.0, u_expand * maxR - delay);
-          float ringW   = 0.04 + float(w) * 0.008; // innere Ringe schärfer
-          float dist2ring = abs(odist - ringPos);
-          float wave = exp(-dist2ring * dist2ring / (ringW * ringW));
-          // Wellenspitze: heller Schimmer
-          float crest = exp(-dist2ring * 30.0) * 0.5;
-          ripple += (wave + crest) * (1.0 - float(w) * 0.15);
+        float front  = u_expand * 1.8;
+        float spread = 0.35 + u_expand * 0.4;
+        float d = odist - front;
+        for (int w = 0; w < 6; w++) {
+          float wd   = d + float(w)*0.18;
+          float wave = exp(-wd*wd/(spread*spread));
+          float surf = cos(wd*18.0 - u_time*2.0)*0.5+0.5;
+          ripple += wave*surf*(1.0-float(w)*0.12);
         }
+        ripple += exp(-abs(odist-front*0.98)*20.0)*0.6;
         ripple *= u_trigger;
-    }
-  float colorT = 0.0;
+      }
+
+      float colorT = 0.0;
       if (u_trigger > 0.0) {
         colorT = clamp((odist/(u_expand*1.8+0.001))*0.8, 0.0, 1.0);
         colorT = mix(1.0-colorT, colorT*0.4, u_expand);
@@ -338,6 +339,12 @@
       float brightness = clamp(darkAmbient + ripple, 0.0, 1.0);
       float vigW = 1.0 - smoothstep(0.5, 1.2, length((uv-0.5)*vec2(aspect,1.0)));
       vec3 colWater = waterColor(brightness*1.1 + colorT*u_trigger*0.5) * mix(0.85,1.0,vigW);
+
+      // ── Überblenden zwischen den zwei Modi ──
+      vec3 col = mix(colCube, colWater, u_mode);
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `;
 
   function makeShader(type, src) {
     const s = gl.createShader(type);
