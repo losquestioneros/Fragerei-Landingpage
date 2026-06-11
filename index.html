@@ -265,7 +265,23 @@
                     return mix(c3, c4, (t-0.75)/0.25);
     }
 
-    // Farbpalette für Wasser-Ripple-Phase (nach Würfel)
+    // Idle-Palette: dunkle Blautöne wie stilles Wasser bei Nacht
+    vec3 idleColor(float t) {
+      vec3 c0 = vec3(0.02, 0.03, 0.10);
+      vec3 c1 = vec3(0.04, 0.07, 0.22);
+      vec3 c2 = vec3(0.06, 0.12, 0.38);
+      vec3 c3 = vec3(0.10, 0.22, 0.55);
+      vec3 c4 = vec3(0.20, 0.45, 0.75);
+      vec3 c5 = vec3(0.55, 0.80, 1.00);
+      t = clamp(t, 0.0, 1.0);
+      if (t < 0.2) return mix(c0, c1, t/0.2);
+      if (t < 0.4) return mix(c1, c2, (t-0.2)/0.2);
+      if (t < 0.6) return mix(c2, c3, (t-0.4)/0.2);
+      if (t < 0.8) return mix(c3, c4, (t-0.6)/0.2);
+                   return mix(c4, c5, (t-0.8)/0.2);
+    }
+
+    // Klick-Palette: das ursprüngliche Farbenspiel (Lila→Violett→Pink→Gold→Weiss)
     vec3 waterColor(float t) {
       vec3 c0 = vec3(0.04, 0.04, 0.10);
       vec3 c1 = vec3(0.27, 0.25, 1.00);
@@ -305,19 +321,32 @@
       float vigC = 1.0 - smoothstep(0.4, 1.1, cdist);
       vec3 colCube = mix(cubeColor(ambient) * 0.15, cubeColor(ambient), vigC);
 
-      // ── MODUS 1: Dunkler Wasser-Ripple nach Würfel ──
+      // ── MODUS 1: Stein-ins-Wasser Effekt ──
       vec2 odiff = (uv - u_origin) * vec2(aspect, 1.0);
       float odist = length(odiff);
 
-      float darkAmbient = 0.0;
-      for (int i = 1; i <= 3; i++) {
-        float fi = float(i);
-        darkAmbient += sin(odist*(8.0+fi*3.0) - u_time*(0.5+fi*0.15))*0.5+0.5;
-        darkAmbient *= (0.06/fi);
+      // Pulsierender Wasser-Ripple im Ruhezustand: Ringe wandern vom Button weg
+      float base = 0.0;
+      for (int r = 0; r < 4; r++) {
+        float fr = float(r);
+        // Alle ~3s entsteht ein neuer Ring im Zentrum und wandert nach aussen
+        float cycle = mod(u_time * 0.33 + fr * 0.25, 1.0);
+        float ringPos = cycle * 1.5;
+        float d2r = abs(odist - ringPos);
+        // Breitere, weichere Ringe wie echte Wasserwellen
+        float ringWave = exp(-d2r * d2r / 0.008);
+        // Helle Wellenspitze obendrauf
+        float crest = exp(-d2r * 40.0) * 0.35;
+        base += (ringWave + crest) * (1.0 - cycle * 0.85) * 0.6;
       }
+      // Sanftes Grundwogen + zentrales Leuchten um den Button
+      base += (sin(odist * 6.0 - u_time * 0.6) * 0.5 + 0.5) * exp(-odist * 1.2) * 0.3;
+      base += exp(-odist * 2.5) * 0.25;
 
+      // Stein-ins-Wasser: mehrere Wellenringe die sich nach aussen bewegen
       float ripple = 0.0;
       if (u_trigger > 0.0) {
+        // ORIGINAL Klick-Effekt: 6 Wellen mit Oberflaechenstruktur
         float front  = u_expand * 1.8;
         float spread = 0.35 + u_expand * 0.4;
         float d = odist - front;
@@ -331,14 +360,18 @@
         ripple *= u_trigger;
       }
 
+      // Idle: dunkle Blau-Ringe | Klick: ursprüngliches Farbenspiel
+      float vigW = 1.0 - smoothstep(0.45, 1.15, odist);
+      vec3 colIdle = idleColor(clamp(base, 0.0, 1.0)) * mix(0.7, 1.0, vigW);
+
       float colorT = 0.0;
       if (u_trigger > 0.0) {
         colorT = clamp((odist/(u_expand*1.8+0.001))*0.8, 0.0, 1.0);
         colorT = mix(1.0-colorT, colorT*0.4, u_expand);
       }
-      float brightness = clamp(darkAmbient + ripple, 0.0, 1.0);
-      float vigW = 1.0 - smoothstep(0.5, 1.2, length((uv-0.5)*vec2(aspect,1.0)));
-      vec3 colWater = waterColor(brightness*1.1 + colorT*u_trigger*0.5) * mix(0.85,1.0,vigW);
+      vec3 colClick = waterColor(ripple*1.1 + colorT*0.5) * mix(0.85, 1.0, vigW);
+
+      vec3 colWater = mix(colIdle, colClick, u_trigger);
 
       // ── Überblenden zwischen den zwei Modi ──
       vec3 col = mix(colCube, colWater, u_mode);
@@ -415,6 +448,12 @@
       const scene = document.getElementById('cubeScene');
       scene.classList.add('done');
       document.getElementById('btnStage').classList.add('visible');
+      // Wellen-Ursprung exakt auf Button-Mitte legen (gleicher Punkt wie Ringe)
+      requestAnimationFrame(() => {
+        const r = document.getElementById('btn').getBoundingClientRect();
+        originX = (r.left + r.width/2)  / innerWidth;
+        originY = (r.top  + r.height/2) / innerHeight;
+      });
     }, 1300);
   }
 
