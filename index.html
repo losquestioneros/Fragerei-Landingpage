@@ -144,6 +144,12 @@
       opacity: 1;
       pointer-events: all;
     }
+    /* Nach dem Klick: Button faded langsam aus waehrend dem Farbenspiel */
+    .btn-stage.fading {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 1.7s ease-out;
+    }
 
     .logo {
       position: absolute;
@@ -494,6 +500,8 @@
     originY = (r.top  + r.height/2) / innerHeight;
     this.classList.add('pressed');
     triggered=true; triggerTime=Date.now();
+    // Button + Logo + Ringe langsam ausfaden waehrend dem Farbenspiel
+    document.getElementById('btnStage').classList.add('fading');
   });
 </script>
 <div class="white-overlay" id="whiteOverlay"></div>
