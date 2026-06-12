@@ -382,6 +382,8 @@
         }
         ripple += exp(-abs(odist-front*0.98)*20.0)*0.6;
         ripple *= u_trigger;
+        // Auspulsieren: letzte Wellen wandern raus und verklingen sanft
+        ripple *= 1.0 - smoothstep(1.15, 1.85, u_expand);
       }
 
       // Idle: dunkle Blau-Ringe | Klick: ursprüngliches Farbenspiel
@@ -396,6 +398,9 @@
       vec3 colClick = waterColor(ripple*1.1 + colorT*0.5) * mix(0.85, 1.0, vigW);
 
       vec3 colWater = mix(colIdle, colClick, u_trigger);
+      // Das Weiss uebernimmt schon waehrend die letzten Wellen rauswandern —
+      // kein dunkler Moment mehr dazwischen
+      colWater = mix(colWater, vec3(1.0), smoothstep(0.75, 1.35, u_expand));
 
       // ── Überblenden zwischen den zwei Modi ──
       vec3 col = mix(colCube, colWater, u_mode);
@@ -447,13 +452,13 @@
     gl.uniform2f(uRes,W,H); gl.uniform1f(uTime,now);
     gl.uniform2f(uOrigin,originX,originY);
     gl.uniform1f(uTrigger, triggered?Math.min(elapsed*1.5,1.0):0.0);
-    gl.uniform1f(uExpand,  triggered?Math.min(elapsed/1.4,1.0):0.0);
+    gl.uniform1f(uExpand,  triggered?Math.min(elapsed/1.4,1.9):0.0);
     gl.uniform1f(uMode, modeValue);
     gl.drawArrays(gl.TRIANGLES,0,6);
 
-    if(triggered&&elapsed>1.5&&!redirected){
+    if(triggered&&elapsed>2.1&&!redirected){
       redirected=true;
-      // Sanftes Fade-out ins Weisse, dann weiterleiten
+      // Letzte Welle ist ausgepulst — jetzt sanft ins Weisse und weiterleiten
       document.getElementById('whiteOverlay').classList.add('show');
       setTimeout(()=>{ window.location.href='https://fragen.fragerei.ch'; },650);
     }
